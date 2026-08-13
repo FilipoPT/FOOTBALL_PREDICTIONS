@@ -1,0 +1,44 @@
+name: Daily Predictions
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # todos os dias as 9h UTC -- ajusta a hora que preferires
+  workflow_dispatch: {}    # permite correr manualmente a partir do GitHub
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # Restaura o cache do modelo treinado da corrida anterior. Usa uma key
+      # unica por run (garante que o save no fim funciona sempre) e um
+      # restore-keys por prefixo (garante que restaura o cache mais recente
+      # disponivel antes de correr). O proprio script decide se o cache
+      # restaurado ainda e valido (CACHE_MAX_AGE_DAYS) ou se precisa retreinar.
+      - name: Restore model cache
+        uses: actions/cache@v4
+        with:
+          path: model_cache
+          key: model-cache-${{ github.run_id }}
+          restore-keys: |
+            model-cache-
+
+      - name: Install dependencies
+        run: pip install requests numpy pandas scipy
+
+      - name: Run predictions
+        run: python3 daily_predictions.py
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HISTORICAL_DATA_PATH: historical_results.csv
+          MODEL_CACHE_DIR: model_cache
+          CACHE_MAX_AGE_DAYS: '7'
