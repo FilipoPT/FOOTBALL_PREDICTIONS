@@ -356,10 +356,108 @@ def fetch_todays_fixtures(league_code):
     return todays_games
 
 
-def match_team_name(name, known_teams, cutoff=0.6):
-    """Fuzzy match entre nomes de equipa da API e do dataset historico."""
-    matches = difflib.get_close_matches(name, known_teams, n=1, cutoff=cutoff)
-    return matches[0] if matches else None
+def match_team_name(name, known_teams, cutoff=0.55):
+    """Resolve o nome de equipa da API para o nome usado no historico treinado.
+    Por ordem: (1) alias explicito conhecido, (2) match exato apos normalizar
+    acentos/maiusculas, (3) uma string contida na outra (normalizacao 'loose',
+    sem sufixos tipo SC/CP/FC), (4) fuzzy match como ultimo recurso. As fontes
+    de dados (football-data.co.uk vs APIs de odds) usam convencoes de nomes
+    muito diferentes (ex: 'Sp Lisbon' vs 'Sporting CP'), e diferencas assim
+    raramente sao resolvidas so por similaridade de texto."""
+    basic_name = _normalize_basic(name)
+
+    # 1. alias explicito -- usa normalizacao "basic" (so acentos/maiusculas),
+    # nunca a "loose" (que tira sufixos como SC/CP e pode colapsar nomes
+    # distintos, ex: 'Vitoria SC' -> 'vitoria', ambiguo).
+    alias_target = TEAM_ALIASES.get(basic_name)
+    if alias_target is not None:
+        for t in known_teams:
+            if _normalize_basic(t) == _normalize_basic(alias_target):
+                return t
+
+    basic_known = {t: _normalize_basic(t) for t in known_teams}
+
+    # 2. match exato pos-normalizacao basica
+    for t, nt in basic_known.items():
+        if nt == basic_name:
+            return t
+
+    # 3. contencao de substring, agora sim com normalizacao "loose"
+    loose_name = _normalize_loose(name)
+    loose_known = {t: _normalize_loose(t) for t in known_teams}
+    for t, nt in loose_known.items():
+        if nt and (nt in loose_name or loose_name in nt):
+            return t
+
+    # 4. fuzzy match como ultimo recurso, sobre a versao loose
+    matches = difflib.get_close_matches(loose_name, list(loose_known.values()), n=1, cutoff=cutoff)
+    if matches:
+        matched_norm = matches[0]
+        for t, nt in loose_known.items():
+            if nt == matched_norm:
+                return t
+    return None
+
+
+def _normalize_basic(name):
+    """So remove acentos e baixa para minusculas -- preserva palavras como
+    'SC'/'CP' que os aliases explicitos precisam para desambiguar."""
+    import unicodedata
+    n = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    return " ".join(n.lower().strip().split())
+
+
+def _normalize_loose(name):
+    """Como _normalize_basic, mas tambem tira palavras genericas que variam
+    muito entre fontes (CP, SC, FC, Clube, de, etc). So para o fallback de
+    substring/fuzzy -- nunca para o lookup de aliases (ver match_team_name)."""
+    n = _normalize_basic(name)
+    for token in [" cp", " sc", " fc", " clube", " de portugal", " clube de", "afc "]:
+        n = n.replace(token, " ")
+    return " ".join(n.split())
+
+
+# Aliases explicitos para casos onde a convencao de nomes e demasiado diferente
+# para o matching automatico resolver sozinho (chave = nome normalizado vindo
+# da API de odds, valor = nome como aparece no historico football-data.co.uk).
+# Adiciona aqui sempre que encontrares um "[!] Equipa nao encontrada".
+TEAM_ALIASES = {
+    "sporting": "Sp Lisbon",
+    "sporting cp": "Sp Lisbon",
+    "sporting lisbon": "Sp Lisbon",
+    "sporting clube de portugal": "Sp Lisbon",
+    "sp braga": "Sp Braga",
+    "braga": "Sp Braga",
+    "vitoria guimaraes": "Guimaraes",
+    "vitoria sc": "Guimaraes",
+    "vitoria de guimaraes": "Guimaraes",
+    "famalicao": "Famalicao",
+    "man united": "Man United",
+    "manchester united": "Man United",
+    "manchester utd": "Man United",
+    "man utd": "Man United",
+    "manchester city": "Man City",
+    "man city": "Man City",
+    "nottingham forest": "Nott'm Forest",
+    "nott'm forest": "Nott'm Forest",
+    "wolverhampton wanderers": "Wolves",
+    "wolverhampton": "Wolves",
+    "tottenham hotspur": "Tottenham",
+    "tottenham": "Tottenham",
+    "spurs": "Tottenham",
+    "brighton and hove albion": "Brighton",
+    "brighton hove albion": "Brighton",
+    "west bromwich albion": "West Brom",
+    "west brom": "West Brom",
+    "atletico madrid": "Ath Madrid",
+    "atl madrid": "Ath Madrid",
+    "athletic bilbao": "Ath Bilbao",
+    "athletic club": "Ath Bilbao",
+    "real betis": "Betis",
+    "celta vigo": "Celta",
+    "rayo vallecano": "Vallecano",
+    "real sociedad": "Sociedad",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -437,7 +535,8 @@ def build_predictions_for_league(league_code, goal_line, force_retrain):
 
         lines.append(f"\n<b>{home_raw} vs {away_raw}</b>")
         if pred is None:
-            lines.append("  [!] Equipa nao encontrada no historico treinado — sem previsao.")
+            unmatched = home_raw if home not in known_teams else away_raw
+            lines.append(f"  [!] '{unmatched}' nao encontrada no historico -- adiciona um alias em TEAM_ALIASES.")
             continue
         lines.append(f"  Golos esperados: {pred['home_exp_goals']} - {pred['away_exp_goals']}")
         lines.append(f"  1X2: {pred['p_home']*100:.1f}% / {pred['p_draw']*100:.1f}% / {pred['p_away']*100:.1f}%")
