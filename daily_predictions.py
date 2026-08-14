@@ -369,7 +369,14 @@ def match_team_name(name, known_teams, cutoff=0.55):
     # 1. alias explicito -- usa normalizacao "basic" (so acentos/maiusculas),
     # nunca a "loose" (que tira sufixos como SC/CP e pode colapsar nomes
     # distintos, ex: 'Vitoria SC' -> 'vitoria', ambiguo).
-    alias_target = TEAM_ALIASES.get(basic_name)
+    # 1. alias explicito -- tenta primeiro com o nome so acentos/maiusculas
+    # normalizados, e se falhar tenta outra vez com sufixos genericos tipo
+    # "FC"/"SC"/"CP" removidos (ex: "Wolverhampton Wanderers FC" -> chave
+    # "wolverhampton wanderers"). Nunca aplicamos a versao loose ao match de
+    # substring/fuzzy para nomes de 1 palavra (ver passo 3/4) para evitar
+    # colapsos ambiguos tipo 'Vitoria SC' -> 'vitoria'.
+    loose_name = _normalize_loose(name)
+    alias_target = TEAM_ALIASES.get(basic_name) or TEAM_ALIASES.get(loose_name)
     if alias_target is not None:
         for t in known_teams:
             if _normalize_basic(t) == _normalize_basic(alias_target):
@@ -383,7 +390,6 @@ def match_team_name(name, known_teams, cutoff=0.55):
             return t
 
     # 3. contencao de substring, agora sim com normalizacao "loose"
-    loose_name = _normalize_loose(name)
     loose_known = {t: _normalize_loose(t) for t in known_teams}
     for t, nt in loose_known.items():
         if nt and (nt in loose_name or loose_name in nt):
@@ -400,10 +406,12 @@ def match_team_name(name, known_teams, cutoff=0.55):
 
 
 def _normalize_basic(name):
-    """So remove acentos e baixa para minusculas -- preserva palavras como
-    'SC'/'CP' que os aliases explicitos precisam para desambiguar."""
+    """So remove acentos, pontuacao e baixa para minusculas -- preserva
+    palavras como 'SC'/'CP' que os aliases explicitos precisam para
+    desambiguar."""
     import unicodedata
     n = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    n = n.replace(".", "")
     return " ".join(n.lower().strip().split())
 
 
