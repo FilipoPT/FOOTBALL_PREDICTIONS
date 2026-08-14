@@ -81,11 +81,13 @@ LEAGUE_MAP = {
     "SP1": "soccer_spain_la_liga",              # La Liga
     "SP2": "soccer_spain_segunda_division",     # La Liga 2 (?)
     "PT1": "soccer_portugal_primeira_liga",     # Primeira Liga
-    "PT2": "soccer_portugal_liga_2",            # Liga Portugal 2 (?)
+    # "PT2": "soccer_portugal_liga_2",          # Liga Portugal 2 -- removida:
+    # sem fonte de historico gratuita (football-data.co.uk so cobre a 1a
+    # divisao portuguesa). Volta a adicionar se arranjares outra fonte de dados.
 }
 
 # Ligas a correr quando nao especificas --leagues. Ajusta a vontade.
-DEFAULT_LEAGUES = ["E0", "E1", "SP1", "SP2", "PT1", "PT2"]
+DEFAULT_LEAGUES = ["E0", "E1", "SP1", "SP2", "PT1"]
 
 ODDS_API_BASE = "https://api.the-odds-api.com/v4"
 
@@ -140,12 +142,28 @@ def dc_log_likelihood(params, teams, home_idx, away_idx, home_goals, away_goals,
     return -np.sum(weights * np.log(prob))
 
 
-def fit_dixon_coles(df, half_life_days=180):
+def fit_dixon_coles(df, half_life_days=180, min_matches=5):
     """
     Treina o modelo Dixon-Coles a partir de um dataframe com colunas:
     date, home_team, away_team, home_goals, away_goals
     Aplica peso de decaimento temporal (jogos recentes pesam mais).
+
+    Equipas com menos de min_matches jogos no historico sao excluidas do
+    treino. Isto protege contra dois problemas: (1) contaminacao de dados
+    (ex: equipas de outra liga misturadas por engano na fonte historica --
+    ja aconteceu com equipas escocesas dentro de dados etiquetados como
+    SP2), e (2) instabilidade numerica -- com poucas observacoes, a
+    otimizacao sem regularizacao pode divergir para parametros extremos
+    (ataque/defesa muito longe de 0), o que depois distorce a escala de
+    TODAS as outras equipas, nao so a que tem poucos dados.
     """
+    counts = pd.concat([df["home_team"], df["away_team"]]).value_counts()
+    sparse_teams = counts[counts < min_matches].index.tolist()
+    if sparse_teams:
+        print(f"[aviso] a excluir {len(sparse_teams)} equipa(s) com menos de {min_matches} "
+              f"jogos no historico (dados insuficientes ou possivel contaminacao): {sparse_teams}")
+        df = df[~df["home_team"].isin(sparse_teams) & ~df["away_team"].isin(sparse_teams)]
+
     teams = sorted(set(df["home_team"]) | set(df["away_team"]))
     team_idx = {t: i for i, t in enumerate(teams)}
     n = len(teams)
@@ -536,16 +554,23 @@ def build_predictions_for_league(league_code, goal_line, force_retrain):
     for game in games:
         home_raw = game["home_team"]
         away_raw = game["away_team"]
-        home = match_team_name(home_raw, known_teams) or home_raw
-        away = match_team_name(away_raw, known_teams) or away_raw
-
-        pred = predict_match(model, home, away, goal_line=goal_line)
+        home = match_team_name(home_raw, known_teams)
+        away = match_team_name(away_raw, known_teams)
 
         lines.append(f"\n<b>{home_raw} vs {away_raw}</b>")
-        if pred is None:
-            unmatched = home_raw if home not in known_teams else away_raw
-            lines.append(f"  [!] '{unmatched}' nao encontrada no historico -- adiciona um alias em TEAM_ALIASES.")
+
+        missing = [name for name, resolved in [(home_raw, home), (away_raw, away)] if resolved is None]
+        if missing:
+            for name in missing:
+                recognized = (_normalize_basic(name) in TEAM_ALIASES) or (_normalize_loose(name) in TEAM_ALIASES)
+                if recognized:
+                    lines.append(f"  [!] '{name}': reconhecida, mas sem jogos suficientes nesta liga "
+                                  f"(provavel equipa recem-subida/descida) -- sem historico para prever.")
+                else:
+                    lines.append(f"  [!] '{name}': nome desconhecido -- considera adicionar um alias em TEAM_ALIASES.")
             continue
+
+        pred = predict_match(model, home, away, goal_line=goal_line)
         lines.append(f"  Golos esperados: {pred['home_exp_goals']} - {pred['away_exp_goals']}")
         lines.append(f"  1X2: {pred['p_home']*100:.1f}% / {pred['p_draw']*100:.1f}% / {pred['p_away']*100:.1f}%")
         lines.append(f"  Over/Under {pred['goal_line']}: {pred['p_over']*100:.1f}% / {pred['p_under']*100:.1f}%")
