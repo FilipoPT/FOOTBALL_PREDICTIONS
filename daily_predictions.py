@@ -514,6 +514,11 @@ TEAM_ALIASES = {
     # dados reais desta equipa em alguma epoca.
     "bolton wanderers": "Bolton",
     "academico de viseu": "Viseu",
+    "west ham united": "West Ham",
+    "real racing club de santander": "Santander",
+    "racing santander": "Santander",
+    "cs maritimo": "Maritimo",
+    "cd maritimo": "Maritimo",
 }
 
 
