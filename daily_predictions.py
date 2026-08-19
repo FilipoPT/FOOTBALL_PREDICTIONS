@@ -519,9 +519,7 @@ TEAM_ALIASES = {
     "racing santander": "Santander",
     "cs maritimo": "Maritimo",
     "cd maritimo": "Maritimo",
-    "sporting gijon": "Sp Gijon",
-    "deportivo la coruna": "La Coruna",
-    "sabadell fc": "Sabadell"
+    "malaga": "Malaga",
 }
 
 
