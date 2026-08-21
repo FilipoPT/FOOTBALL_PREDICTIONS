@@ -520,6 +520,8 @@ TEAM_ALIASES = {
     "cs maritimo": "Maritimo",
     "cd maritimo": "Maritimo",
     "malaga": "Malaga",
+    "girona fc": "Girona",
+    "girona": "Girona",
 }
 
 
